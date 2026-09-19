@@ -365,7 +365,7 @@ export default function Home() {
               </svg>
             </div>
             <span className="font-mono text-sm font-semibold tracking-wider text-white">
-              VOLTAGENT<span className="text-accent">.RAG</span>
+              <span className="text-accent">.RAG</span>
             </span>
             <span className="text-line-strong">/</span>
             <span className="truncate text-[13px] text-muted">

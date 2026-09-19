@@ -132,7 +132,7 @@ export default function ProjectsPage() {
                             </svg>
                         </div>
                         <span className="font-mono text-sm font-semibold tracking-wider text-white">
-                            VOLTAGENT<span className="text-accent">.RAG</span>
+                            <span className="text-accent">.RAG</span>
                         </span>
                         <span className="text-line-strong">/</span>
                         <Link

@@ -29,6 +29,13 @@ interface RetrievedChunk {
   page?: number | null;
 }
 
+interface UploadProgress {
+  stage: string;
+  percent: number;
+  current?: number;
+  total?: number;
+}
+
 const NO_ANSWER = "I couldn't find the answer in the selected documents.";
 
 export default function Home() {
@@ -52,6 +59,9 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
   const [uploadSuccess, setUploadSuccess] = useState<boolean | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
+    null
+  );
 
   // Search scope
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
@@ -147,6 +157,7 @@ export default function Home() {
     setUploading(true);
     setUploadMessage("");
     setUploadSuccess(null);
+    setUploadProgress({ stage: "Starting upload", percent: 2 });
 
     try {
       const formData = new FormData();
@@ -158,19 +169,66 @@ export default function Home() {
         body: formData,
       });
 
-      const data = await response.json();
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || "The file could not be indexed");
+      }
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "The file could not be indexed");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "";
+      let completed: { documentId: string; totalChunks: number } | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = pending.split("\n");
+        pending = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as {
+            type: string;
+            stage?: string;
+            percent?: number;
+            current?: number;
+            total?: number;
+            documentId?: string;
+            totalChunks?: number;
+            error?: string;
+          };
+
+          if (event.type === "progress") {
+            setUploadProgress({
+              stage: event.stage || "Processing",
+              percent: event.percent || 0,
+              current: event.current,
+              total: event.total,
+            });
+          } else if (event.type === "error") {
+            throw new Error(event.error || "The file could not be indexed");
+          } else if (event.type === "complete") {
+            completed = {
+              documentId: event.documentId || "",
+              totalChunks: event.totalChunks || 0,
+            };
+          }
+        }
+
+        if (done) break;
+      }
+
+      if (!completed?.documentId) {
+        throw new Error("The upload ended before indexing completed");
       }
 
       setUploadSuccess(true);
       setUploadMessage(
-        `Indexed — ${data.totalChunks} searchable sections created.`
+        `Indexed — ${completed.totalChunks} searchable sections created.`
       );
 
       await loadDocuments();
-      setSelectedDocumentId(data.documentId);
+      setSelectedDocumentId(completed.documentId);
 
       setFile(null);
       if (fileInputRef.current) {
@@ -186,6 +244,7 @@ export default function Home() {
       );
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -508,6 +567,41 @@ export default function Home() {
                     <span className="shrink-0 text-muted">
                       {(file.size / (1024 * 1024)).toFixed(2)} MB
                     </span>
+                  </div>
+                )}
+
+                {uploading && uploadProgress && (
+                  <div
+                    className="rounded-[6px] border border-line bg-elevated px-3 py-3"
+                    aria-live="polite"
+                  >
+                    <div className="flex items-center justify-between gap-3 text-[12px]">
+                      <span className="font-medium text-ink">
+                        {uploadProgress.stage}
+                      </span>
+                      <span className="font-mono text-accent">
+                        {uploadProgress.percent}%
+                      </span>
+                    </div>
+                    <div
+                      className="mt-2 h-1.5 overflow-hidden rounded-full bg-line"
+                      role="progressbar"
+                      aria-label="Document indexing progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={uploadProgress.percent}
+                    >
+                      <div
+                        className="h-full rounded-full bg-accent transition-[width] duration-300"
+                        style={{ width: `${uploadProgress.percent}%` }}
+                      />
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted">
+                      {typeof uploadProgress.current === "number" &&
+                      typeof uploadProgress.total === "number"
+                        ? `Indexed ${uploadProgress.current} of ${uploadProgress.total} chunks`
+                        : "Preparing document for indexing"}
+                    </p>
                   </div>
                 )}
 
